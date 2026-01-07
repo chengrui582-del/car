@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>互動駕駛模擬器</title>
+<style>
+body {
+    margin: 0;
+    background: #111;
+    overflow: hidden;
+    font-family: Arial, sans-serif;
+}
+#gameCanvas {
+    display: block;
+    margin: 0 auto;
+    background: #222;
+    border: 2px solid #555;
+}
+.controls {
+    position: absolute;
+    bottom: 10px;
+    width: 100%;
+    text-align: center;
+}
+button {
+    margin: 5px;
+    padding: 15px 25px;
+    font-size: 16px;
+}
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="600" height="400"></canvas>
+
+<div class="controls">
+    <button id="leftBtn">⬅️ 左轉</button>
+    <button id="rightBtn">➡️ 右轉</button>
+    <button id="accelBtn">⛽ 油門</button>
+    <button id="brakeBtn">🛑 煞車</button>
+    <button id="leftSignalBtn">🔺 左方向燈</button>
+    <button id="rightSignalBtn">🔺 右方向燈</button>
+    <button id="headlightBtn">💡 遠燈</button>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// --- 車輛設定 ---
+let car = {
+    x: canvas.width/2 - 25,
+    y: canvas.height - 100,
+    width: 50,
+    height: 80,
+    speed: 0,
+    maxSpeed: 6,
+    acc: 0.2,
+    friction: 0.05,
+    angle: 0,
+};
+
+// --- 控制狀態 ---
+let controls = {
+    left: false,
+    right: false,
+    accel: false,
+    brake: false,
+    leftSignal: false,
+    rightSignal: false,
+    headlight: false
+};
+
+// --- 障礙物 ---
+let obstacles = [];
+let obstacleSpeed = 2;
+
+// --- 分數 ---
+let score = 0;
+let gameOver = false;
+
+// --- 創建障礙物 ---
+function createObstacle(){
+    const obsWidth = 50 + Math.random()*50;
+    const obsX = Math.random()*(canvas.width - obsWidth);
+    obstacles.push({x: obsX, y: -100, width: obsWidth, height: 20});
+}
+
+// --- 更新車輛 ---
+function updateCar(){
+    if(controls.accel) car.speed += car.acc;
+    if(controls.brake) car.speed -= car.acc;
+    car.speed *= (1 - car.friction);
+    if(car.speed > car.maxSpeed) car.speed = car.maxSpeed;
+    if(car.speed < 0) car.speed = 0;
+
+    if(controls.left) car.angle = -2;
+    else if(controls.right) car.angle = 2;
+    else car.angle = 0;
+
+    car.x += car.angle;
+    car.y -= car.speed;
+
+    // 邊界限制
+    if(car.x < 0) car.x = 0;
+    if(car.x + car.width > canvas.width) car.x = canvas.width - car.width;
+    if(car.y < 0) car.y = 0;
+    if(car.y + car.height > canvas.height) car.y = canvas.height - car.height;
+}
+
+// --- 更新障礙物 ---
+function updateObstacles(){
+    obstacles.forEach(obs => { obs.y += obstacleSpeed; });
+    obstacles = obstacles.filter(obs => {
+        if(obs.y > canvas.height){
+            score++;
+            return false;
+        }
+        return true;
+    });
+
+    // 碰撞檢測
+    obstacles.forEach(obs => {
+        if(car.x < obs.x + obs.width &&
+           car.x + car.width > obs.x &&
+           car.y < obs.y + obs.height &&
+           car.y + car.height > obs.y){
+               gameOver = true;
+           }
+    });
+}
+
+// --- 繪製遊戲 ---
+function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // 背景道路
+    ctx.fillStyle = "#333";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    // 道路標線
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 4;
+    ctx.setLineDash([20,20]);
+    ctx.beginPath();
+    ctx.moveTo(canvas.width/2,0);
+    ctx.lineTo(canvas.width/2,canvas.height);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 遠燈效果
+    if(controls.headlight){
+        ctx.fillStyle = "rgba(255,255,200,0.2)";
+        ctx.beginPath();
+        ctx.moveTo(car.x+car.width/2, car.y);
+        ctx.lineTo(car.x - 150, 0);
+        ctx.lineTo(car.x + car.width + 150, 0);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    // 車輛
+    ctx.fillStyle = "red";
+    ctx.fillRect(car.x, car.y, car.width, car.height);
+
+    // 方向燈
+    if(controls.leftSignal){
+        ctx.fillStyle = "yellow";
+        ctx.fillRect(car.x-10, car.y+10, 5, 15);
+        ctx.fillRect(car.x-10, car.y+car.height-25, 5, 15);
+    }
+    if(controls.rightSignal){
+        ctx.fillStyle = "yellow";
+        ctx.fillRect(car.x+car.width+5, car.y+10, 5, 15);
+        ctx.fillRect(car.x+car.width+5, car.y+car.height-25, 5, 15);
+    }
+
+    // 障礙物
+    ctx.fillStyle = "yellow";
+    obstacles.forEach(obs => ctx.fillRect(obs.x, obs.y, obs.width, obs.height));
+
+    // 分數
+    ctx.fillStyle = "white";
+    ctx.font = "20px Arial";
+    ctx.fillText("分數: " + score, 10, 30);
+
+    if(!gameOver) requestAnimationFrame(draw);
+    else{
+        ctx.fillStyle = "white";
+        ctx.font = "40px Arial";
+        ctx.fillText("遊戲結束!", 150, canvas.height/2);
+    }
+}
+
+// --- 遊戲循環 ---
+function gameLoop(){
+    if(!gameOver){
+        updateCar();
+        updateObstacles();
+        requestAnimationFrame(gameLoop);
+    }
+}
+
+// --- 按鈕事件 ---
+document.getElementById('leftBtn').addEventListener('mousedown', ()=>{ controls.left=true; });
+document.getElementById('leftBtn').addEventListener('mouseup', ()=>{ controls.left=false; });
+document.getElementById('rightBtn').addEventListener('mousedown', ()=>{ controls.right=true; });
+document.getElementById('rightBtn').addEventListener('mouseup', ()=>{ controls.right=false; });
+document.getElementById('accelBtn').addEventListener('mousedown', ()=>{ controls.accel=true; });
+document.getElementById('accelBtn').addEventListener('mouseup', ()=>{ controls.accel=false; });
+document.getElementById('brakeBtn').addEventListener('mousedown', ()=>{ controls.brake=true; });
+document.getElementById('brakeBtn').addEventListener('mouseup', ()=>{ controls.brake=false; });
+
+document.getElementById('leftSignalBtn').addEventListener('click', ()=>{
+    controls.leftSignal = !controls.leftSignal;
+    controls.rightSignal = false;
+});
+document.getElementById('rightSignalBtn').addEventListener('click', ()=>{
+    controls.rightSignal = !controls.rightSignal;
+    controls.leftSignal = false;
+});
+document.getElementById('headlightBtn').addEventListener('click', ()=>{ controls.headlight = !controls.headlight; });
+
+// 鍵盤操作
+document.addEventListener('keydown', e=>{
+    if(e.key==='ArrowLeft') controls.left=true;
+    if(e.key==='ArrowRight') controls.right=true;
+    if(e.key==='ArrowUp') controls.accel=true;
+    if(e.key==='ArrowDown') controls.brake=true;
+});
+document.addEventListener('keyup', e=>{
+    if(e.key==='ArrowLeft') controls.left=false;
+    if(e.key==='ArrowRight') controls.right=false;
+    if(e.key==='ArrowUp') controls.accel=false;
+    if(e.key==='ArrowDown') controls.brake=false;
+});
+
+// --- 初始化 ---
+draw();
+gameLoop();
+setInterval(createObstacle, 2000);
+</script>
+
+</body>
+</html>
