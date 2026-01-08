@@ -2,193 +2,226 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<title>真實駕駛模擬器 - 第一人稱</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>手機版真實馬力表</title>
 <style>
-body { margin: 0; overflow: hidden; background: #111; font-family: Arial; }
-#gameCanvas { display: block; margin: 0 auto; background: #222; }
-.controls { position: absolute; bottom: 10px; width: 100%; text-align: center; }
-button { margin: 5px; padding: 15px 25px; font-size: 16px; }
-#dashboard { position: absolute; top: 10px; left: 10px; color: white; font-size: 18px; }
+  body {
+    margin: 0;
+    background: #111;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-family: sans-serif;
+    touch-action: none;
+  }
+  #gauge-container {
+    position: relative;
+    width: 90vw;
+    max-width: 400px;
+    height: 90vw;
+    max-height: 400px;
+  }
+  canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+  #controls {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .button {
+    width: 80px;
+    height: 60px;
+    background: #222;
+    border-radius: 10px;
+    font-size: 20px;
+    color: #fff;
+    text-align: center;
+    line-height: 60px;
+    user-select: none;
+  }
+  .gear-buttons {
+    display: flex;
+    gap: 10px;
+  }
 </style>
 </head>
 <body>
-<canvas id="gameCanvas" width="600" height="400"></canvas>
-<div id="dashboard">速度: 0 km/h | RPM: 0</div>
-<div class="controls">
-<button id="leftBtn">⬅️ 左轉</button>
-<button id="rightBtn">➡️ 右轉</button>
-<button id="accelBtn">⛽ 油門</button>
-<button id="brakeBtn">🛑 煞車</button>
-<button id="leftSignalBtn">🔺 左方向燈</button>
-<button id="rightSignalBtn">🔺 右方向燈</button>
-<button id="headlightBtn">💡 遠燈</button>
+
+<div id="gauge-container">
+  <canvas id="dial" width="400" height="400"></canvas>
+  <canvas id="needle" width="400" height="400"></canvas>
+  <canvas id="powerCurve" width="400" height="400"></canvas>
 </div>
+
+<div id="controls">
+  <div id="throttle" class="button">油門</div>
+  <div class="gear-buttons">
+    <div class="button" onclick="changeGear(1)">1</div>
+    <div class="button" onclick="changeGear(2)">2</div>
+    <div class="button" onclick="changeGear(3)">3</div>
+    <div class="button" onclick="changeGear(4)">4</div>
+    <div class="button" onclick="changeGear(5)">5</div>
+    <div class="button" onclick="changeGear(6)">6</div>
+  </div>
+  <div>檔位: <span id="gearDisplay">1</span></div>
+  <div>RPM: <span id="rpmDisplay">1000</span>  HP: <span id="hpDisplay">0</span></div>
+</div>
+
 <script>
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const dashboard = document.getElementById('dashboard');
+const dialCanvas = document.getElementById('dial');
+const needleCanvas = document.getElementById('needle');
+const curveCanvas = document.getElementById('powerCurve');
+const dialCtx = dialCanvas.getContext('2d');
+const needleCtx = needleCanvas.getContext('2d');
+const curveCtx = curveCanvas.getContext('2d');
 
-// --- 玩家車輛 ---
-let car = {
-    x: canvas.width/2,
-    y: canvas.height - 100,
-    width: 50,
-    height: 80,
-    speed: 0,
-    maxSpeed: 12,
-    acc: 0.3,
-    friction: 0.05,
-    angle: 0
-};
+const rpmDisplay = document.getElementById('rpmDisplay');
+const hpDisplay = document.getElementById('hpDisplay');
+const gearDisplay = document.getElementById('gearDisplay');
 
-// --- 控制 ---
-let controls = { left:false, right:false, accel:false, brake:false, leftSignal:false, rightSignal:false, headlight:false };
+const maxRPM = 9000;
+const redline = 7000;
+let currentRPM = 1000;
+let throttle = false;
+let gear = 1;
 
-// --- 道路 ---
-let road = { width: 300, laneWidth: 100, offset:0, curve:0 };
-
-// --- AI 車流 ---
-let aiCars = [];
-function createAICar(){
-    const lane = Math.floor(Math.random()*3);
-    aiCars.push({
-        x: canvas.width/2 - road.width/2 + lane*road.laneWidth + road.laneWidth/2 - 20,
-        y: -100,
-        width: 40,
-        height: 80,
-        speed: 2 + Math.random()*2,
-        lane: lane
-    });
+// 模擬扭力曲線 (Nm)
+const torqueCurve = [];
+for(let rpm=0; rpm<=maxRPM; rpm+=100){
+  let torque = 200 * Math.sin(Math.PI * rpm / maxRPM) + 100; 
+  torqueCurve.push({rpm, torque});
 }
 
-// --- 遊戲狀態 ---
-let score = 0;
-let gameOver = false;
+// 畫圓形表盤
+function drawDial(){
+  dialCtx.clearRect(0,0,400,400);
+  const centerX = 200, centerY = 200, radius = 180;
 
-// --- 更新車輛 ---
-function updateCar(){
-    if(controls.accel) car.speed += car.acc;
-    if(controls.brake) car.speed -= car.acc;
-    car.speed *= (1 - car.friction);
-    if(car.speed > car.maxSpeed) car.speed = car.maxSpeed;
-    if(car.speed < 0) car.speed = 0;
+  dialCtx.beginPath();
+  dialCtx.arc(centerX, centerY, radius, 0, 2*Math.PI);
+  dialCtx.fillStyle = '#222';
+  dialCtx.fill();
 
-    if(controls.left) car.angle = -3;
-    else if(controls.right) car.angle = 3;
-    else car.angle = 0;
+  for(let i=0;i<=maxRPM;i+=1000){
+    let angle = Math.PI*0.75 + i/maxRPM * (Math.PI*1.5);
+    let x1 = centerX + Math.cos(angle)*radius;
+    let y1 = centerY + Math.sin(angle)*radius;
+    let x2 = centerX + Math.cos(angle)*(radius-15);
+    let y2 = centerY + Math.sin(angle)*(radius-15);
 
-    car.x += car.angle;
-    // 邊界
-    if(car.x < canvas.width/2 - road.width/2 + car.width/2) car.x = canvas.width/2 - road.width/2 + car.width/2;
-    if(car.x > canvas.width/2 + road.width/2 - car.width/2) car.x = canvas.width/2 + road.width/2 - car.width/2;
+    dialCtx.beginPath();
+    dialCtx.moveTo(x1,y1);
+    dialCtx.lineTo(x2,y2);
+    dialCtx.strokeStyle = '#fff';
+    dialCtx.lineWidth = 2;
+    dialCtx.stroke();
+
+    let textX = centerX + Math.cos(angle)*(radius-30);
+    let textY = centerY + Math.sin(angle)*(radius-30);
+    dialCtx.fillStyle = '#fff';
+    dialCtx.font = '16px sans-serif';
+    dialCtx.textAlign = 'center';
+    dialCtx.textBaseline = 'middle';
+    dialCtx.fillText(i, textX, textY);
+  }
+
+  let redAngle = Math.PI*0.75 + redline/maxRPM * (Math.PI*1.5);
+  dialCtx.beginPath();
+  dialCtx.arc(centerX, centerY, radius-10, redAngle-0.01, redAngle+0.01);
+  dialCtx.strokeStyle = 'red';
+  dialCtx.lineWidth = 4;
+  dialCtx.stroke();
 }
 
-// --- 更新 AI 車 ---
-function updateAICars(){
-    aiCars.forEach(ai=>{
-        // 避讓邏輯
-        if(Math.abs(ai.x - car.x)<50 && ai.y < car.y){ ai.speed = car.speed*0.8; }
-        ai.y += ai.speed + car.speed*0.5;
-    });
-    aiCars = aiCars.filter(ai=>{ if(ai.y>canvas.height){ score++; return false; } return true; });
+// 畫指針
+function drawNeedle(rpm){
+  needleCtx.clearRect(0,0,400,400);
+  const centerX = 200, centerY = 200, radius = 160;
+  let angle = Math.PI*0.75 + rpm/maxRPM * (Math.PI*1.5);
 
-    // 碰撞
-    aiCars.forEach(ai=>{
-        if(Math.abs(ai.x-car.x)<(ai.width+car.width)/2 && Math.abs(ai.y-car.y)<(ai.height+car.height)/2){ gameOver=true; }
-    });
+  needleCtx.beginPath();
+  needleCtx.moveTo(centerX, centerY);
+  needleCtx.lineTo(centerX + Math.cos(angle)*radius, centerY + Math.sin(angle)*radius);
+  needleCtx.strokeStyle = 'red';
+  needleCtx.lineWidth = 4;
+  needleCtx.stroke();
+
+  needleCtx.beginPath();
+  needleCtx.arc(centerX, centerY, 10, 0, 2*Math.PI);
+  needleCtx.fillStyle = '#fff';
+  needleCtx.fill();
 }
 
-// --- 繪製 ---
-function draw(){
-    ctx.clearRect(0,0,canvas.width,canvas.height);
+// 畫馬力曲線
+function drawPowerCurve(){
+  curveCtx.clearRect(0,0,400,400);
+  const centerX = 200, centerY = 200, radius = 150;
 
-    // 道路滾動 + 曲線
-    road.offset += car.speed;
-    road.curve = Math.sin(Date.now()/1000)*50; // 曲線動畫
-    ctx.fillStyle = "#333";
-    ctx.beginPath();
-    ctx.moveTo(canvas.width/2 - road.width/2 + road.curve,0);
-    ctx.lineTo(canvas.width/2 + road.width/2 + road.curve,0);
-    ctx.lineTo(canvas.width/2 + road.width/2 - road.curve,canvas.height);
-    ctx.lineTo(canvas.width/2 - road.width/2 - road.curve,canvas.height);
-    ctx.closePath();
-    ctx.fill();
+  curveCtx.beginPath();
+  for(let i=0;i<torqueCurve.length;i++){
+    let rpm = torqueCurve[i].rpm;
+    let torque = torqueCurve[i].torque;
+    let hp = torque * rpm / 712.5; 
+    let angle = Math.PI*0.75 + rpm/maxRPM * (Math.PI*1.5);
+    let len = radius * hp/500; 
+    let x = centerX + Math.cos(angle)*len;
+    let y = centerY + Math.sin(angle)*len;
 
-    // 車道標線
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth=4;
-    ctx.setLineDash([20,20]);
-    for(let i=1;i<3;i++){
-        ctx.beginPath();
-        ctx.moveTo(canvas.width/2 - road.width/2 + i*road.laneWidth, -road.offset%40);
-        ctx.lineTo(canvas.width/2 - road.width/2 + i*road.laneWidth, canvas.height);
-        ctx.stroke();
-    }
-    ctx.setLineDash([]);
-
-    // AI 車
-    ctx.fillStyle="blue";
-    aiCars.forEach(ai=>{
-        ctx.fillRect(ai.x-ai.width/2, ai.y-ai.height/2, ai.width, ai.height);
-    });
-
-    // 遠燈 + 夜間霧
-    if(controls.headlight){
-        ctx.fillStyle="rgba(255,255,200,0.15)";
-        ctx.beginPath();
-        ctx.moveTo(car.x, car.y-car.height/2);
-        ctx.lineTo(car.x-150,0);
-        ctx.lineTo(car.x+150,0);
-        ctx.closePath();
-        ctx.fill();
-    }
-    ctx.fillStyle="rgba(255,255,255,0.05)"; ctx.fillRect(0,0,canvas.width,canvas.height); // 夜間霧
-
-    // 玩家車
-    ctx.fillStyle="red";
-    ctx.fillRect(car.x-car.width/2, car.y-car.height/2, car.width, car.height);
-
-    // 方向燈
-    if(controls.leftSignal){ctx.fillStyle="yellow";ctx.fillRect(car.x-car.width/2-10,car.y-30,5,15);ctx.fillRect(car.x-car.width/2-10,car.y+10,5,15);}
-    if(controls.rightSignal){ctx.fillStyle="yellow";ctx.fillRect(car.x+car.width/2+5,car.y-30,5,15);ctx.fillRect(car.x+car.width/2+5,car.y+10,5,15);}
-
-    // 儀表板
-    dashboard.innerText = `速度: ${Math.round(car.speed*10)} km/h | RPM: ${Math.round(car.speed*50)}`;
-
-    if(!gameOver) requestAnimationFrame(draw);
-    else { ctx.fillStyle="white"; ctx.font="40px Arial"; ctx.fillText("遊戲結束!",150,canvas.height/2); }
+    if(i===0) curveCtx.moveTo(x,y);
+    else curveCtx.lineTo(x,y);
+  }
+  curveCtx.strokeStyle = '#0f0';
+  curveCtx.lineWidth = 2;
+  curveCtx.stroke();
 }
 
-// --- 遊戲循環 ---
-function gameLoop(){
-    if(!gameOver){ updateCar(); updateAICars(); requestAnimationFrame(gameLoop); }
+// 改變檔位
+function changeGear(g){
+  gear = g;
+  gearDisplay.textContent = gear;
 }
 
-// --- 控制 ---
-document.getElementById('leftBtn').addEventListener('mousedown',()=>{controls.left=true;});
-document.getElementById('leftBtn').addEventListener('mouseup',()=>{controls.left=false;});
-document.getElementById('rightBtn').addEventListener('mousedown',()=>{controls.right=true;});
-document.getElementById('rightBtn').addEventListener('mouseup',()=>{controls.right=false;});
-document.getElementById('accelBtn').addEventListener('mousedown',()=>{controls.accel=true;});
-document.getElementById('accelBtn').addEventListener('mouseup',()=>{controls.accel=false;});
-document.getElementById('brakeBtn').addEventListener('mousedown',()=>{controls.brake=true;});
-document.getElementById('brakeBtn').addEventListener('mouseup',()=>{controls.brake=false;});
-document.getElementById('leftSignalBtn').addEventListener('click',()=>{controls.leftSignal=!controls.leftSignal; controls.rightSignal=false;});
-document.getElementById('rightSignalBtn').addEventListener('click',()=>{controls.rightSignal=!controls.rightSignal; controls.leftSignal=false;});
-document.getElementById('headlightBtn').addEventListener('click',()=>{controls.headlight=!controls.headlight;});
+// 更新RPM與HP
+function updateValues(){
+  let rpmIncrease = throttle ? 200*gear : -150; // 檔位影響加速
+  currentRPM += rpmIncrease * 0.05;
+  currentRPM = Math.max(0, Math.min(maxRPM, currentRPM));
 
-// --- 鍵盤 ---
-document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft') controls.left=true;if(e.key==='ArrowRight') controls.right=true;if(e.key==='ArrowUp') controls.accel=true;if(e.key==='ArrowDown') controls.brake=true;});
-document.addEventListener('keyup',e=>{if(e.key==='ArrowLeft') controls.left=false;if(e.key==='ArrowRight') controls.right=false;if(e.key==='ArrowUp') controls.accel=false;if(e.key==='ArrowDown') controls.brake=false;});
+  // 計算當前HP
+  let torque = torqueCurve[Math.floor(currentRPM/100)]?.torque || 100;
+  let hp = torque * currentRPM / 712.5; 
 
-// --- 手機傾斜控制 ---
-window.addEventListener('deviceorientation', e=>{ car.angle = e.gamma/10; });
+  rpmDisplay.textContent = Math.floor(currentRPM);
+  hpDisplay.textContent = Math.floor(hp);
 
-// --- 初始化 ---
-draw();
-gameLoop();
-setInterval(createAICar, 2000);
+  drawNeedle(currentRPM);
+}
+
+// 油門觸控事件
+const throttleBtn = document.getElementById('throttle');
+throttleBtn.addEventListener('touchstart',()=>{ throttle=true; });
+throttleBtn.addEventListener('touchend',()=>{ throttle=false; });
+throttleBtn.addEventListener('mousedown',()=>{ throttle=true; });
+throttleBtn.addEventListener('mouseup',()=>{ throttle=false; });
+throttleBtn.addEventListener('mouseleave',()=>{ throttle=false; });
+
+// 動畫循環
+drawDial();
+drawPowerCurve();
+function loop(){
+  updateValues();
+  requestAnimationFrame(loop);
+}
+loop();
 </script>
+
 </body>
 </html>
-
