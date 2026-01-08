@@ -3,281 +3,173 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>馬力表</title>
+<title>真實車輛儀表</title>
 <style>
-  body {
-    margin: 0;
-    background: #111;
-    color: #fff;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    font-family: sans-serif;
-    touch-action: none;
-  }
-  #gauge-container {
-    position: relative;
-    width: 90vw;
-    max-width: 400px;
-    height: 90vw;
-    max-height: 400px;
-  }
-  canvas {
-    position: absolute;
-    top: 0;
-    left: 0;
-  }
-  #controls {
-    margin-top: 10px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-  }
-  .button {
-    width: 80px;
-    height: 60px;
-    background: #222;
-    border-radius: 10px;
-    font-size: 20px;
-    color: #fff;
-    text-align: center;
-    line-height: 60px;
-    user-select: none;
-  }
-  .gear-buttons {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-  #dataDisplay {
-    margin-top: 5px;
-    font-size: 16px;
-  }
+body{
+  margin:0;
+  background:#111;
+  color:#fff;
+  font-family:sans-serif;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+#gauge{
+  position:relative;
+  width:90vw;
+  max-width:400px;
+  height:90vw;
+  max-height:400px;
+}
+canvas{position:absolute}
+.controls{
+  margin-top:10px;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  justify-content:center;
+}
+.btn{
+  width:80px;
+  height:55px;
+  background:#222;
+  border-radius:10px;
+  text-align:center;
+  line-height:55px;
+  user-select:none;
+}
+.data{
+  margin-top:5px;
+  font-size:15px;
+}
 </style>
 </head>
 <body>
 
-<div id="gauge-container">
+<div id="gauge">
   <canvas id="dial" width="400" height="400"></canvas>
   <canvas id="needle" width="400" height="400"></canvas>
-  <canvas id="powerCurve" width="400" height="400"></canvas>
+  <canvas id="hpDot" width="400" height="400"></canvas>
 </div>
 
-<div id="controls">
-  <div class="gear-buttons">
-    <div class="button" onclick="changeGear(1)">1</div>
-    <div class="button" onclick="changeGear(2)">2</div>
-    <div class="button" onclick="changeGear(3)">3</div>
-    <div class="button" onclick="changeGear(4)">4</div>
-    <div class="button" onclick="changeGear(5)">5</div>
-    <div class="button" onclick="changeGear(6)">6</div>
-  </div>
+<div class="controls">
+  <div class="btn" id="keyBtn">KEY</div>
+  <div class="btn" id="throttle">油門</div>
+  <div class="btn" id="brake">煞車</div>
+</div>
 
-  <div class="gear-buttons">
-    <div id="startBtn" class="button">啟動</div>
-    <div id="throttle" class="button">油門</div>
-    <div id="brake" class="button">煞車</div>
-  </div>
+<div class="controls">
+  <div class="btn" onclick="setGear(1)">1</div>
+  <div class="btn" onclick="setGear(2)">2</div>
+  <div class="btn" onclick="setGear(3)">3</div>
+  <div class="btn" onclick="setGear(4)">4</div>
+  <div class="btn" onclick="setGear(5)">5</div>
+  <div class="btn" onclick="setGear(6)">6</div>
+</div>
 
-  <div id="dataDisplay">
-    狀態: <span id="status">熄火</span> | 檔位: <span id="gearDisplay">1</span> | RPM: <span id="rpmDisplay">0</span> | HP: <span id="hpDisplay">0</span>
-  </div>
+<div class="data">
+  狀態:<span id="state">OFF</span> |
+  檔位:<span id="gear">1</span> |
+  RPM:<span id="rpm">0</span> |
+  HP:<span id="hp">0</span> |
+  速度:<span id="speed">0</span> km/h |
+  燃油:<span id="fuel">100</span>%
 </div>
 
 <script>
-const dialCanvas = document.getElementById('dial');
-const needleCanvas = document.getElementById('needle');
-const curveCanvas = document.getElementById('powerCurve');
-const dialCtx = dialCanvas.getContext('2d');
-const needleCtx = needleCanvas.getContext('2d');
-const curveCtx = curveCanvas.getContext('2d');
+const dial=document.getElementById("dial").getContext("2d");
+const needle=document.getElementById("needle").getContext("2d");
+const hpDot=document.getElementById("hpDot").getContext("2d");
 
-const rpmDisplay = document.getElementById('rpmDisplay');
-const hpDisplay = document.getElementById('hpDisplay');
-const gearDisplay = document.getElementById('gearDisplay');
-const statusDisplay = document.getElementById('status');
+let key=false, throttle=false, brake=false;
+let rpm=0, gear=1, speed=0, fuel=100;
 
-const maxRPM = 9000;
-const redline = 7000;
-let currentRPM = 0;
-let displayedRPM = 0;
-let throttle = false;
-let brake = false;
-let gear = 1;
-let started = false;
+const maxRPM=9000;
+const gearRatio=[0,3.5,2.2,1.6,1.2,1.0,0.8];
+const finalDrive=3.9;
+const wheel=2.0;
 
-// 模擬扭力曲線 (Nm)
-const torqueCurve = [];
-for(let rpm=0; rpm<=maxRPM; rpm+=100){
-  let torque = 200 * Math.sin(Math.PI * rpm / maxRPM) + 100; 
-  torqueCurve.push({rpm, torque});
-}
-
-// 畫圓形表盤
 function drawDial(){
-  dialCtx.clearRect(0,0,400,400);
-  const cx = 200, cy = 200, radius = 180;
-
-  dialCtx.beginPath();
-  dialCtx.arc(cx, cy, radius, 0, 2*Math.PI);
-  dialCtx.fillStyle = '#222';
-  dialCtx.fill();
-
-  for(let i=0;i<=maxRPM;i+=1000){
-    let angle = Math.PI*0.75 + i/maxRPM * (Math.PI*1.5);
-    let x1 = cx + Math.cos(angle)*radius;
-    let y1 = cy + Math.sin(angle)*radius;
-    let x2 = cx + Math.cos(angle)*(radius-15);
-    let y2 = cy + Math.sin(angle)*(radius-15);
-
-    dialCtx.beginPath();
-    dialCtx.moveTo(x1,y1);
-    dialCtx.lineTo(x2,y2);
-    dialCtx.strokeStyle = '#fff';
-    dialCtx.lineWidth = 2;
-    dialCtx.stroke();
-
-    let textX = cx + Math.cos(angle)*(radius-30);
-    let textY = cy + Math.sin(angle)*(radius-30);
-    dialCtx.fillStyle = '#fff';
-    dialCtx.font = '16px sans-serif';
-    dialCtx.textAlign = 'center';
-    dialCtx.textBaseline = 'middle';
-    dialCtx.fillText(i, textX, textY);
-  }
-
-  let redAngle = Math.PI*0.75 + redline/maxRPM * (Math.PI*1.5);
-  dialCtx.beginPath();
-  dialCtx.arc(cx, cy, radius-10, redAngle-0.01, redAngle+0.01);
-  dialCtx.strokeStyle = 'red';
-  dialCtx.lineWidth = 4;
-  dialCtx.stroke();
+  dial.clearRect(0,0,400,400);
+  dial.fillStyle="#222";
+  dial.beginPath();
+  dial.arc(200,200,180,0,Math.PI*2);
+  dial.fill();
+}
+function drawNeedle(){
+  needle.clearRect(0,0,400,400);
+  let a=Math.PI*0.75+rpm/maxRPM*Math.PI*1.5;
+  needle.beginPath();
+  needle.moveTo(200,200);
+  needle.lineTo(200+Math.cos(a)*150,200+Math.sin(a)*150);
+  needle.strokeStyle="red";
+  needle.lineWidth=4;
+  needle.stroke();
+}
+function drawHP(){
+  hpDot.clearRect(0,0,400,400);
+  let torque=200*Math.sin(Math.PI*rpm/maxRPM)+100;
+  let hp=torque*rpm/712.5;
+  let a=Math.PI*0.75+rpm/maxRPM*Math.PI*1.5;
+  let r=100+hp/500*60;
+  hpDot.beginPath();
+  hpDot.arc(200+Math.cos(a)*r,200+Math.sin(a)*r,6,0,Math.PI*2);
+  hpDot.fillStyle="yellow";
+  hpDot.fill();
+  document.getElementById("hp").textContent=Math.floor(hp);
 }
 
-// 畫指針
-function drawNeedle(rpm){
-  needleCtx.clearRect(0,0,400,400);
-  const cx = 200, cy = 200, radius = 160;
-  let angle = Math.PI*0.75 + rpm/maxRPM * (Math.PI*1.5);
+function update(){
+  if(key && fuel>0){
+    if(throttle) rpm+=120*gear;
+    if(brake) rpm-=400;
+    rpm-=60;
+    fuel-=throttle?rpm*0.000002:0.0003;
+  } else rpm-=100;
 
-  needleCtx.beginPath();
-  needleCtx.moveTo(cx, cy);
-  needleCtx.lineTo(cx + Math.cos(angle)*radius, cy + Math.sin(angle)*radius);
-  needleCtx.strokeStyle = 'red';
-  needleCtx.lineWidth = 4;
-  needleCtx.stroke();
+  rpm=Math.max(0,Math.min(maxRPM,rpm));
+  fuel=Math.max(0,fuel);
 
-  needleCtx.beginPath();
-  needleCtx.arc(cx, cy, 10, 0, 2*Math.PI);
-  needleCtx.fillStyle = '#fff';
-  needleCtx.fill();
+  speed=(rpm/(gearRatio[gear]*finalDrive))*wheel*60/1000;
+
+  document.getElementById("rpm").textContent=Math.floor(rpm);
+  document.getElementById("speed").textContent=Math.floor(speed);
+  document.getElementById("fuel").textContent=fuel.toFixed(1);
+
+  drawNeedle();
+  drawHP();
+  requestAnimationFrame(update);
 }
 
-// 畫馬力曲線 + 即時高亮
-function drawPowerCurve(currentRPM){
-  curveCtx.clearRect(0,0,400,400);
-  const cx = 200, cy = 200, radius = 150;
+function setGear(g){gear=g;document.getElementById("gear").textContent=g;}
 
-  let currentHP = 0;
-  curveCtx.beginPath();
-  for(let i=0;i<torqueCurve.length;i++){
-    let rpm = torqueCurve[i].rpm;
-    let torque = torqueCurve[i].torque;
-    let hp = torque * rpm / 712.5; 
-    if(Math.abs(rpm - currentRPM)<50) currentHP = hp;
+document.getElementById("keyBtn").onclick=()=>{
+  key=!key;
+  document.getElementById("state").textContent=key?"ON":"OFF";
+};
 
-    let angle = Math.PI*0.75 + rpm/maxRPM * (Math.PI*1.5);
-    let len = radius * hp/500; 
-    let x = cx + Math.cos(angle)*len;
-    let y = cy + Math.sin(angle)*len;
-
-    if(i===0) curveCtx.moveTo(x,y);
-    else curveCtx.lineTo(x,y);
-  }
-  curveCtx.strokeStyle = '#0f0';
-  curveCtx.lineWidth = 2;
-  curveCtx.stroke();
-
-  // 高亮當前馬力
-  let angle = Math.PI*0.75 + currentRPM/maxRPM * (Math.PI*1.5);
-  let len = radius * currentHP/500;
-  let hx = cx + Math.cos(angle)*len;
-  let hy = cy + Math.sin(angle)*len;
-  curveCtx.beginPath();
-  curveCtx.arc(hx, hy, 6, 0, 2*Math.PI);
-  curveCtx.fillStyle = '#ff0';
-  curveCtx.fill();
-
-  return currentHP;
-}
-
-// 改變檔位
-function changeGear(g){
-  gear = g;
-  gearDisplay.textContent = gear;
-}
-
-// 更新RPM與HP
-function updateValues(){
-  if(!started) return;
-
-  let rpmIncrease = throttle ? 200*gear : (brake ? -600 : -150); 
-  currentRPM += rpmIncrease * 0.05;
-  currentRPM = Math.max(0, Math.min(maxRPM, currentRPM));
-
-  // 平滑指針
-  displayedRPM += (currentRPM - displayedRPM) * 0.1;
-
-  let hp = drawPowerCurve(displayedRPM);
-
-  rpmDisplay.textContent = Math.floor(displayedRPM);
-  hpDisplay.textContent = Math.floor(hp);
-
-  drawNeedle(displayedRPM);
-}
-
-// 油門 & 煞車觸控事件
-const throttleBtn = document.getElementById('throttle');
-const brakeBtn = document.getElementById('brake');
-
-throttleBtn.addEventListener('touchstart',()=>{ throttle=true; });
-throttleBtn.addEventListener('touchend',()=>{ throttle=false; });
-throttleBtn.addEventListener('mousedown',()=>{ throttle=true; });
-throttleBtn.addEventListener('mouseup',()=>{ throttle=false; });
-throttleBtn.addEventListener('mouseleave',()=>{ throttle=false; });
-
-brakeBtn.addEventListener('touchstart',()=>{ brake=true; });
-brakeBtn.addEventListener('touchend',()=>{ brake=false; });
-brakeBtn.addEventListener('mousedown',()=>{ brake=true; });
-brakeBtn.addEventListener('mouseup',()=>{ brake=false; });
-brakeBtn.addEventListener('mouseleave',()=>{ brake=false; });
-
-// 啟動按鈕
-const startBtn = document.getElementById('startBtn');
-startBtn.addEventListener('click',()=>{
-  started = !started;
-  statusDisplay.textContent = started ? "啟動" : "熄火";
-  if(!started){
-    currentRPM = 0;
-    displayedRPM = 0;
-  }
+["mousedown","touchstart"].forEach(e=>{
+  throttle.addEventListener(e,()=>throttle=true);
+  brake.addEventListener(e,()=>brake=true);
+});
+["mouseup","touchend","mouseleave"].forEach(e=>{
+  throttle.addEventListener(e,()=>throttle=false);
+  brake.addEventListener(e,()=>brake=false);
 });
 
-// 初始畫面
+document.addEventListener("keydown",e=>{
+  if(e.key==="w") throttle=true;
+  if(e.key==="s") brake=true;
+  if(e.key==="e") document.getElementById("keyBtn").click();
+  if(e.key>="1"&&e.key<="6") setGear(+e.key);
+});
+document.addEventListener("keyup",e=>{
+  if(e.key==="w") throttle=false;
+  if(e.key==="s") brake=false;
+});
+
 drawDial();
-drawPowerCurve(displayedRPM);
-drawNeedle(displayedRPM);
-
-// 動畫循環
-function loop(){
-  updateValues();
-  requestAnimationFrame(loop);
-}
-loop();
+update();
 </script>
-
 </body>
 </html>
